@@ -10,7 +10,9 @@ import AST
 
 asclStyle = emptyDef { commentLine = "#" }
 
-asclLexer = makeTokenParser asclStyle
+asclLexer = (makeTokenParser asclStyle) {
+    lexeme = (\p -> p >>= return)
+    }
 
 -- | given a number parser, p, parses optional sign +,-
 signed p = do
@@ -22,32 +24,40 @@ signed p = do
             <|> (char '+' >> return id)
             <|> return id
 
-ws = skipMany1 space >> spaces
+boundary p = do
+    x <- p
+    lookAhead $ eof <|> (space >> return ())
+    return x
 
-asclBool = do
+asclBool = boundary $ do
     s <- string "True" <|> string "False"
     case s of
         "True" -> return True
         "False" -> return False
 
-asclInt = signed (natural asclLexer)
-asclFloat = signed (float asclLexer)
-asclHex = signed (char '0' >> hexadecimal asclLexer)
-asclOctal = signed (char '0' >> octal asclLexer)
+asclInt = boundary $ signed (natural asclLexer)
+asclFloat = boundary $ signed (float asclLexer)
+asclHex = boundary $ signed (char '0' >> hexadecimal asclLexer)
+asclOctal = boundary $ signed (char '0' >> octal asclLexer)
 
-asclChar = charLiteral asclLexer
-asclString = stringLiteral asclLexer
+asclChar = boundary $ charLiteral asclLexer
+asclString = boundary $ stringLiteral asclLexer
 
-asclWord = manyTill anyChar space
+asclWord = many1 (satisfy (not . isSpace))
 
-parseBool = asclBool >>= (return . AsclBool)
-parseInt = asclInt >>= (return . AsclInt . fromIntegral)
-parseFloat = asclFloat >>= (return . AsclFloat)
-parseHex = asclHex >>= (return . AsclInt . fromIntegral)
-parseOctal = asclOctal >>= (return . AsclInt . fromIntegral)
-parseChar = asclChar >>= (return . AsclChar)
-parseString = asclString >>= (return . AsclString)
-parseWord = asclWord >>= (return . AsclWord)
+at p = do
+    pos <- getPosition
+    x <- p
+    return $ At pos x
+
+parseBool = at $ AsclBool `fmap` asclBool
+parseInt = at $ (AsclInt . fromIntegral) `fmap` asclInt
+parseFloat = at $ AsclFloat `fmap` asclFloat
+parseHex = at $ (AsclInt . fromIntegral) `fmap` asclHex
+parseOctal = at $ (AsclInt . fromIntegral) `fmap` asclOctal
+parseChar = at $ AsclChar `fmap` asclChar
+parseString = at $ AsclString `fmap` asclString
+parseWord = at $ AsclWord `fmap` asclWord
 
 asclToken = try parseBool
     <|> try parseChar
@@ -58,7 +68,15 @@ asclToken = try parseBool
     <|> try parseInt
     <|> try parseWord
 
-asclParser = spaces >> sepEndBy parseInt spaces
+{-
+asclParser = do
+    spaces
+    x <- sepBy asclToken spaces
+    spaces
+    eof
+    return x
+-}
 
+asclParser = spaces >> sepEndBy asclToken (skipMany1 space)
 
 
